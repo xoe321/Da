@@ -1,0 +1,23 @@
+# Bundled into the APK at build time (nothing is downloaded on the phone).
+# uvicorn[standard] -> plain uvicorn: uvloop/httptools/watchfiles don't exist for Android.
+fastapi
+uvicorn
+httpx
+requests
+pydantic
+python-dotenv
+websockets
+sqlalchemy
+aiomysql
+asyncpg
+aiosqlite
+redis
+argon2-cffi
+bcrypt
+PyJWT
+cryptography
+slowapi
+msgpack
+orjson
+protobuf
+grpcio
