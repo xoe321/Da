@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Server Runner</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <h1>Server Runner</h1>
+        <p>Web Dashboard · ดูข้อมูลอย่างเดียว</p>
+      </div>
+      <button id="logout" class="button secondary hidden" type="button">ออกจากระบบ</button>
+    </header>
+
+    <section id="login" class="panel login hidden">
+      <h2>ยืนยันตัวตน</h2>
+      <p id="auth-message" class="muted">กำลังขอรหัสยืนยัน...</p>
+      <form id="code-form">
+        <label for="code">รหัส 6 หลักจาก Notification บนมือถือ</label>
+        <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]{6}" maxlength="6" required>
+        <button class="button primary" type="submit">เข้าสู่ระบบ</button>
+      </form>
+      <button id="request-code" class="button secondary hidden" type="button">ส่งรหัสอีกครั้ง</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <section class="panel dashboard-tunnel">
+        <div class="section-heading">
+          <div>
+            <h2>Web Dashboard Tunnel</h2>
+            <div class="badges">
+              <span id="dashboard-server-status" class="badge">Dashboard: กำลังเริ่ม</span>
+              <span id="dashboard-tunnel-status" class="badge">Tunnel: กำลังเริ่ม</span>
+            </div>
+          </div>
+          <a id="dashboard-url" class="domain hidden" target="_blank" rel="noopener noreferrer"></a>
+        </div>
+        <h3>Tunnel Logs</h3>
+        <pre id="dashboard-tunnel-log" class="log"></pre>
+        <details>
+          <summary>Dashboard Server Logs</summary>
+          <pre id="dashboard-server-log" class="log"></pre>
+        </details>
+      </section>
+
+      <div class="section-heading servers-heading">
+        <div>
+          <h2>Servers</h2>
+          <p class="muted">อัปเดตสถานะและ Logs อัตโนมัติ</p>
+        </div>
+        <span id="updated" class="muted"></span>
+      </div>
+      <section id="servers" class="servers"></section>
+      <p id="state-error" class="error" role="alert"></p>
+    </section>
+  </main>
+</body>
+</html>

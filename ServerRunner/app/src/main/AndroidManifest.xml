@@ -33,5 +33,6 @@
         <service android:name=".PyWorker3" android:process=":py3" android:exported="false"/>
         <service android:name=".PyWorker4" android:process=":py4" android:exported="false"/>
         <service android:name=".PyWorker5" android:process=":py5" android:exported="false"/>
+        <service android:name=".PyWorker6" android:process=":dashboard" android:exported="false"/>
     </application>
 </manifest>

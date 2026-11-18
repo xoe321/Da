@@ -14,6 +14,8 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.Handler
 import android.os.Looper
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -22,6 +24,11 @@ import java.io.RandomAccessFile
 class ServerService : Service() {
     companion object {
         const val START = "start"; const val STOP = "stop"; const val STOP_ALL = "stopall"; const val BOOT = "boot"
+        const val DASHBOARD_START = "dashboard_start"
+        const val DASHBOARD_STOP = "dashboard_stop"
+        const val DASHBOARD_READY = "dashboard_ready"
+        const val DASHBOARD_CODE = "dashboard_code"
+        const val DASHBOARD_FAILED = "dashboard_failed"
     }
 
     private class Run {
@@ -38,11 +45,22 @@ class ServerService : Service() {
         PyWorker3::class.java, PyWorker4::class.java, PyWorker5::class.java)
     private val main = Handler(Looper.getMainLooper())
     private val fixedOnce = HashSet<String>()   // servers already auto-fixed for DB errors (one restart max)
+    private val dashboardDomainPattern = Regex("https://[a-z0-9-]+\\.trycloudflare\\.com")
+    private val dashboardErrorPattern = Regex("(?i)\\b(error|err|fatal|exception|traceback|failed|refused|denied)\\b|[A-Za-z]+Error\\b")
+    private val dashboardServerSuccessPattern = Regex(
+        "(?i)(application startup complete|uvicorn running on|server is running|listening on|ready to accept)"
+    )
+    private val dashboardTunnelSuccessPattern = Regex("(?i)(registered tunnel connection|quick tunnel has been created)")
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    @Volatile private var dashboardWorkerStarted = false
+    @Volatile private var dashboardPort: Int? = null
+    @Volatile private var dashboardTunnel: Process? = null
+    @Volatile private var dashboardTunnelStarting = false
 
     private fun log(id: String, s: String) { try { Store.serverLogFile(this, id).appendText(s + "\n") } catch (e: Exception) {} }
     private fun tunnelLog(id: String, s: String) { try { Store.tunnelLogFile(this, id).appendText(s + "\n") } catch (e: Exception) {} }
+    private fun dashboardLog(file: File, line: String) { try { file.appendText(line + "\n") } catch (e: Exception) {} }
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -53,12 +71,32 @@ class ServerService : Service() {
             START -> id?.let { fixedOnce.remove(it); startOne(it) }
             STOP -> id?.let { fixedOnce.remove(it); stopOne(it) }
             STOP_ALL -> { fixedOnce.clear(); runs.keys.toList().forEach { killRun(it) }; Store.setRunning(this, emptySet()) }
+            DASHBOARD_START -> {
+                Store.setDashboardEnabled(this, true)
+                startDashboardWorker()
+            }
+            DASHBOARD_READY -> i?.getIntExtra("port", 0)?.takeIf { it in 1..65535 }?.let {
+                dashboardPort = it
+                startDashboardTunnel(it)
+            }
+            DASHBOARD_CODE -> i?.getStringExtra("code")?.let { notifyDashboardCode(it) }
+            DASHBOARD_FAILED -> {
+                dashboardWorkerStarted = false
+                dashboardLog(Store.dashboardServerLogFile(this), "Dashboard ERROR: ${i?.getStringExtra("error") ?: "startup failed"}")
+            }
+            DASHBOARD_STOP -> {
+                Store.setDashboardEnabled(this, false)
+                stopDashboardRuntime()
+                Store.setDashboardUrl(this, "")
+            }
             // BOOT, or restarted by the system after being killed (null intent): resume everything wanted.
-            else -> Store.running(this).forEach { startOne(it) }
+            else -> {
+                Store.running(this).forEach { startOne(it) }
+                if (Store.dashboardEnabled(this)) startDashboardWorker()
+            }
         }
-        val empty = Store.running(this).isEmpty()
-        if (act != STOP && act != STOP_ALL) foreground()
-        if (empty) {
+        val shouldStay = Store.running(this).isNotEmpty() || Store.dashboardEnabled(this)
+        if (!shouldStay) {
             releaseLocks(); stopForeground(true); stopSelf()
             return START_NOT_STICKY
         }
@@ -81,9 +119,10 @@ class ServerService : Service() {
         val openPi = PendingIntent.getActivity(this, 1,
             Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Store.running(this).size
+        val dashboard = Store.dashboardEnabled(this)
         startForeground(1, Notification.Builder(this, ch)
-            .setContentTitle("Server is running")
-            .setContentText("$n server ทำงานอยู่ในพื้นหลัง")
+            .setContentTitle(if (dashboard) "Server Runner is running" else "Server is running")
+            .setContentText(if (dashboard) "$n server และ Web Dashboard ทำงานอยู่" else "$n server ทำงานอยู่ในพื้นหลัง")
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOngoing(true)
             .setContentIntent(openPi)
@@ -111,6 +150,160 @@ class ServerService : Service() {
         try { wakeLock?.takeIf { it.isHeld }?.release() } catch (e: Exception) {}
         try { wifiLock?.takeIf { it.isHeld }?.release() } catch (e: Exception) {}
         wakeLock = null; wifiLock = null
+    }
+
+    private fun startDashboardWorker() {
+        if (!Store.dashboardEnabled(this) || dashboardWorkerStarted) return
+        dashboardWorkerStarted = true
+        dashboardPort = null
+        dashboardTunnelStarting = false
+        dashboardTunnel?.destroy()
+        dashboardTunnel = null
+        Store.dashboardServerLogFile(this).writeText("Starting read-only Web Dashboard\n")
+        Store.dashboardTunnelLogFile(this).writeText("")
+        Store.setDashboardUrl(this, "")
+        try {
+            val uiDir = File(filesDir, "dashboard-ui").apply { mkdirs() }
+            val names = assets.list("dashboard") ?: emptyArray()
+            if (names.isEmpty()) throw IllegalStateException("Dashboard web assets are missing")
+            names.forEach { name ->
+                assets.open("dashboard/$name").use { input ->
+                    File(uiDir, name).outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+            startService(Intent(this, PyWorker6::class.java)
+                .putExtra("dashboard", true)
+                .putExtra("root", filesDir.path)
+                .putExtra("ui", uiDir.path))
+        } catch (e: Exception) {
+            dashboardWorkerStarted = false
+            dashboardLog(Store.dashboardServerLogFile(this), "Dashboard ERROR: ${e.message}")
+        }
+    }
+
+    private fun startDashboardTunnel(port: Int) {
+        if (!Store.dashboardEnabled(this) || dashboardTunnelStarting || dashboardTunnel?.isAlive == true) return
+        dashboardTunnelStarting = true
+        Thread { runDashboardTunnel(port) }.start()
+    }
+
+    private fun runDashboardTunnel(port: Int) {
+        var process: Process? = null
+        try {
+            val home = File(filesDir, "dashboard-home").apply { mkdirs() }
+            val binary = File(applicationInfo.nativeLibraryDir, "libcloudflared.so")
+            val builder = ProcessBuilder(
+                binary.path, "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:$port"
+            )
+            builder.environment()["HOME"] = home.path
+            builder.environment()["TMPDIR"] = cacheDir.path
+            builder.redirectErrorStream(true)
+            process = builder.start()
+            dashboardTunnel = process
+            if (!Store.dashboardEnabled(this) || dashboardPort != port) {
+                process.destroy()
+                return
+            }
+            process.inputStream.bufferedReader().forEachLine { line ->
+                dashboardLog(Store.dashboardTunnelLogFile(this), line)
+                dashboardDomainPattern.find(line)?.value?.let { Store.setDashboardUrl(this, it) }
+            }
+        } catch (e: Exception) {
+            dashboardLog(Store.dashboardTunnelLogFile(this), "TUNNEL ERROR: ${e.message}")
+        } finally {
+            if (dashboardTunnel === process) {
+                dashboardTunnel = null
+                Store.setDashboardUrl(this, "")
+            }
+            dashboardTunnelStarting = false
+        }
+    }
+
+    private fun stopDashboardRuntime() {
+        dashboardWorkerStarted = false
+        dashboardPort = null
+        dashboardTunnelStarting = false
+        dashboardTunnel?.destroy()
+        dashboardTunnel = null
+        stopService(Intent(this, PyWorker6::class.java))
+    }
+
+    private fun statusForLog(logText: String, running: Boolean, successPattern: Regex): String {
+        if (!running) return "หยุดอยู่"
+        val lines = logText.lineSequence().toList()
+        val errorIndex = lines.indexOfLast { dashboardErrorPattern.containsMatchIn(it) }
+        val successIndex = lines.indexOfLast { successPattern.containsMatchIn(it) }
+        return when {
+            errorIndex > successIndex -> "พบ Error"
+            successIndex >= 0 -> "ทำงานปกติ"
+            else -> "กำลังเริ่ม"
+        }
+    }
+
+    private fun dashboardState(): JSONObject {
+        val running = Store.running(this)
+        val servers = JSONArray()
+        for (server in Store.load(this)) {
+            val serverLog = tail(Store.serverLogFile(this, server.id), 12000)
+            val tunnelLog = tail(Store.tunnelLogFile(this, server.id), 12000)
+            val serverDir = Store.dir(this, server.id)
+            val serverFile = File(serverDir, "server_file")
+            val databases = JSONArray()
+            Store.dbFiles(this, server.id).forEach { databases.put(it.relativeTo(serverDir).path) }
+            servers.put(JSONObject()
+                .put("id", server.id)
+                .put("name", server.name.ifBlank { "Server" })
+                .put("port", server.port)
+                .put("running", server.id in running)
+                .put("serverStatus", statusForLog(serverLog, server.id in running, dashboardServerSuccessPattern))
+                .put("tunnelStatus", statusForLog(tunnelLog, server.id in running, dashboardTunnelSuccessPattern))
+                .put("file", if (serverFile.exists()) serverFile.name else "ยังไม่ได้เลือกไฟล์")
+                .put("databases", databases)
+                .put("domain", dashboardDomainPattern.find(tunnelLog)?.value.orEmpty())
+                .put("serverLog", redactLog(serverLog, server.token))
+                .put("tunnelLog", redactLog(tunnelLog, server.token)))
+        }
+        return JSONObject()
+            .put("dashboardUrl", Store.dashboardUrl(this))
+            .put("dashboardServerStatus", if (dashboardWorkerStarted) "ทำงานปกติ" else "หยุดอยู่")
+            .put("dashboardTunnelStatus", if (Store.dashboardUrl(this).isNotBlank()) "ทำงานปกติ" else "กำลังเริ่ม")
+            .put("dashboardServerLog", tail(Store.dashboardServerLogFile(this), 12000))
+            .put("dashboardTunnelLog", tail(Store.dashboardTunnelLogFile(this), 12000))
+            .put("servers", servers)
+    }
+
+    private fun redactLog(text: String, token: String): String {
+        var result = text
+        if (token.isNotBlank()) result = result.replace(token, "[REDACTED]")
+        return Regex("(?i)([\"']?(?:token|password|secret|api[_-]?key)[\"']?\\s*[:=]\\s*[\"']?)([^\"'\\s,;}]+)")
+            .replace(result) { match -> match.groupValues[1] + "[REDACTED]" }
+    }
+
+    private fun notifyDashboardCode(code: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled()) {
+            dashboardLog(Store.dashboardServerLogFile(this), "Cannot send dashboard code: notifications are disabled")
+            return
+        }
+        val channel = "dashboard-auth"
+        manager.createNotificationChannel(NotificationChannel(
+            channel, "Dashboard sign-in code", NotificationManager.IMPORTANCE_HIGH
+        ).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE })
+        val publicNotification = Notification.Builder(this, channel)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("Dashboard sign-in requested")
+            .setContentText("Unlock your phone to view the code")
+            .build()
+        val notification = Notification.Builder(this, channel)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("Dashboard sign-in code")
+            .setContentText(code)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicNotification)
+            .setTimeoutAfter(5 * 60 * 1000L)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(2, notification)
     }
 
     private fun startOne(id: String, note: String? = null) {
@@ -195,7 +388,7 @@ class ServerService : Service() {
     private fun tail(f: File, n: Int): String = try {
         RandomAccessFile(f, "r").use {
             val len = minOf(n.toLong(), it.length()).toInt()
-            it.seek(it.length() - len); val b = ByteArray(len); it.readFully(b); String(b)
+            it.seek(it.length() - len); val b = ByteArray(len); it.readFully(b); String(b, Charsets.UTF_8)
         }
     } catch (e: Exception) { "" }
 
@@ -288,6 +481,7 @@ class ServerService : Service() {
 
     override fun onDestroy() {
         runs.keys.toList().forEach { killRun(it) }
+        stopDashboardRuntime()
         releaseLocks()
         android.os.Process.killProcess(android.os.Process.myPid())
     }

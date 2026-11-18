@@ -90,6 +90,10 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
         }
         toolbar.addView(title, LinearLayout.LayoutParams(0, dp(52), 1f))
+        toolbar.addView(styledButton("⚙", inputColor).apply {
+            contentDescription = "Settings"
+            setOnClickListener { openDashboardSettings() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) })
         toolbar.addView(styledButton("☰", inputColor).apply {
             contentDescription = "เปิดรายชื่อ Server"
             setOnClickListener { openDrawer() }
@@ -154,6 +158,8 @@ class MainActivity : Activity() {
 
         setContentView(root)
         buildList()
+        Store.setDashboardEnabled(this, true)
+        startForegroundService(Intent(this, ServerService::class.java).setAction(ServerService.DASHBOARD_START))
         if (intent?.getBooleanExtra("stop", false) == true) { stopAll(); intent.removeExtra("stop") }
     }
 
@@ -188,6 +194,36 @@ class MainActivity : Activity() {
     private fun closeDrawer() {
         drawerOverlay.visibility = View.GONE
         drawer.visibility = View.GONE
+    }
+
+    private fun openDashboardSettings() {
+        val url = Store.dashboardUrl(this)
+        val message = if (url.isBlank()) {
+            "Web Dashboard กำลังเริ่มและเชื่อมต่อ Tunnel อยู่"
+        } else {
+            "Web Dashboard พร้อมใช้งาน\n$url"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Settings · Web Dashboard")
+            .setMessage(message)
+            .setPositiveButton("Open In Web") { _, _ ->
+                val currentUrl = Store.dashboardUrl(this)
+                if (currentUrl.isBlank()) {
+                    Toast.makeText(this, "Tunnel ยังเชื่อมต่อไม่เสร็จ", Toast.LENGTH_SHORT).show()
+                } else {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)))
+                }
+            }
+            .setNeutralButton("คัดลอก Link") { _, _ ->
+                val currentUrl = Store.dashboardUrl(this)
+                if (currentUrl.isNotBlank()) {
+                    (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("Dashboard URL", currentUrl))
+                    Toast.makeText(this, "คัดลอก Link แล้ว", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("ปิด", null)
+            .show()
     }
 
     // Older single-server version stored one "server_file" + a token pref.

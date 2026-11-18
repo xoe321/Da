@@ -1,0 +1,269 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #222831;
+  background: #f3f4f6;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f3f4f6;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.page {
+  width: min(100% - 28px, 920px);
+  margin: 0 auto;
+  padding: 22px 0 40px;
+}
+
+.topbar,
+.section-heading,
+.server-heading,
+.meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar {
+  margin-bottom: 20px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 3px;
+  font-size: 1.45rem;
+  font-weight: 650;
+}
+
+h2 {
+  margin-bottom: 4px;
+  font-size: 1.1rem;
+  font-weight: 620;
+}
+
+h3 {
+  margin: 16px 0 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+p {
+  margin-bottom: 0;
+}
+
+.muted {
+  color: #68717d;
+  font-size: 0.88rem;
+}
+
+.panel,
+.server-card {
+  border: 1px solid #dfe2e6;
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+}
+
+.dashboard-tunnel {
+  margin-bottom: 24px;
+}
+
+.servers-heading {
+  margin: 0 2px 12px;
+}
+
+.servers {
+  display: grid;
+  gap: 12px;
+}
+
+.server-heading {
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.server-name {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-block;
+  border: 1px solid #dfe2e6;
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: #515a66;
+  background: #f6f7f8;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.badge.good {
+  color: #286044;
+  background: #eef6f0;
+  border-color: #d7e9dc;
+}
+
+.badge.bad {
+  color: #8a3434;
+  background: #fbefef;
+  border-color: #efdada;
+}
+
+.meta {
+  margin: 0;
+  color: #555f6b;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.domain {
+  color: #3f5d79;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.log {
+  max-height: 210px;
+  min-height: 54px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #e3e5e8;
+  border-radius: 8px;
+  background: #f7f8f9;
+  color: #313842;
+  font: 0.76rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-error {
+  color: #a13d3d;
+}
+
+.log-success {
+  color: #286044;
+}
+
+.log-title {
+  margin: 14px 0 6px;
+  color: #535c68;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+details {
+  margin-top: 12px;
+}
+
+summary {
+  color: #535c68;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.login {
+  max-width: 430px;
+  margin: 36px auto;
+}
+
+form {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+label {
+  font-size: 0.9rem;
+}
+
+input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #cfd4da;
+  border-radius: 8px;
+  background: #fff;
+  color: #222831;
+  letter-spacing: 0.18em;
+}
+
+.button {
+  border: 1px solid #cfd4da;
+  border-radius: 8px;
+  padding: 9px 13px;
+  cursor: pointer;
+}
+
+.button.primary {
+  border-color: #37414c;
+  color: #fff;
+  background: #37414c;
+}
+
+.button.secondary {
+  color: #37414c;
+  background: #fff;
+}
+
+.error {
+  min-height: 1.2em;
+  margin-top: 10px;
+  color: #a13d3d;
+  font-size: 0.86rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 560px) {
+  .page {
+    width: min(100% - 20px, 920px);
+    padding-top: 14px;
+  }
+
+  .panel,
+  .server-card {
+    padding: 13px;
+  }
+
+  .server-heading,
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .badges,
+  .domain {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}

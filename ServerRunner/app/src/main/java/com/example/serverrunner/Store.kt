@@ -13,6 +13,12 @@ object Store {
     fun dir(c: Context, id: String) = File(c.filesDir, "servers/$id").apply { mkdirs() }
     fun serverLogFile(c: Context, id: String) = File(dir(c, id), "server.log")
     fun tunnelLogFile(c: Context, id: String) = File(dir(c, id), "tunnel.log")
+    fun dashboardServerLogFile(c: Context) = File(c.filesDir, "dashboard-server.log")
+    fun dashboardTunnelLogFile(c: Context) = File(c.filesDir, "dashboard-tunnel.log")
+    fun dashboardUrl(c: Context) = File(c.filesDir, "dashboard.url").takeIf { it.exists() }?.readText()?.trim().orEmpty()
+    fun setDashboardUrl(c: Context, value: String) { File(c.filesDir, "dashboard.url").writeText(value) }
+    fun dashboardEnabled(c: Context) = File(c.filesDir, "dashboard.enabled").takeIf { it.exists() }?.readText() == "true"
+    fun setDashboardEnabled(c: Context, enabled: Boolean) { File(c.filesDir, "dashboard.enabled").writeText(enabled.toString()) }
 
     fun dataDir(c: Context, id: String) = File(dir(c, id), "data").apply { mkdirs() }
     // Include databases nested in data/ or the server folder (relative paths resolve there).

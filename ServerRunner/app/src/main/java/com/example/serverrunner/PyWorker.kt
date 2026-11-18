@@ -15,6 +15,21 @@ open class PyWorker : Service() {
 
     override fun onStartCommand(i: Intent?, f: Int, id: Int): Int {
         if (i == null) return START_NOT_STICKY
+        if (i.getBooleanExtra("dashboard", false)) {
+            val root = i.getStringExtra("root") ?: return START_NOT_STICKY
+            val ui = i.getStringExtra("ui") ?: return START_NOT_STICKY
+            Thread {
+                try {
+                    if (!Python.isStarted()) Python.start(AndroidPlatform(this))
+                    Python.getInstance().getModule("dashboard_web").callAttr("run", this, root, ui)
+                } catch (e: Exception) {
+                    File(root, "dashboard-server.log").appendText("Dashboard ERROR: ${e.message}\n")
+                    startService(Intent(this, ServerService::class.java)
+                        .setAction(ServerService.DASHBOARD_FAILED).putExtra("error", e.message))
+                }
+            }.start()
+            return START_NOT_STICKY
+        }
         val path = i.getStringExtra("path") ?: return START_NOT_STICKY
         val log = i.getStringExtra("log") ?: return START_NOT_STICKY
         val port = i.getIntExtra("port", 8080)
@@ -36,3 +51,4 @@ class PyWorker2 : PyWorker()
 class PyWorker3 : PyWorker()
 class PyWorker4 : PyWorker()
 class PyWorker5 : PyWorker()
+class PyWorker6 : PyWorker()
