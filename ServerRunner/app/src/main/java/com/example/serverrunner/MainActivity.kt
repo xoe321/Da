@@ -341,7 +341,7 @@ class MainActivity : Activity() {
             isVerticalScrollBarEnabled = true
             isFillViewport = true
             background = roundedBackground(Color.rgb(8, 13, 24))
-            addView(log, ScrollView.LayoutParams(-1, -2))
+            addView(log, FrameLayout.LayoutParams(-1, -2))
         }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val start = styledButton("เริ่ม", Color.rgb(5, 150, 105)).apply { setOnClickListener { startFlow(s.id) } }
