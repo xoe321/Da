@@ -9,6 +9,6 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         if (i.action != Intent.ACTION_BOOT_COMPLETED) return
         if (Store.running(c).isEmpty()) return
-        c.startForegroundService(Intent(c, ServerService::class.java).setAction(ServerService.BOOT))
+        c.startForegroundService(Intent(c, ServerService::class.java))
     }
 }
