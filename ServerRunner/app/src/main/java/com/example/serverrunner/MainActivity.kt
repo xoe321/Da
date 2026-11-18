@@ -23,6 +23,7 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import java.io.File
@@ -340,7 +341,16 @@ class MainActivity : Activity() {
         val logScroll = ScrollView(this).apply {
             isVerticalScrollBarEnabled = true
             isFillViewport = true
+            isNestedScrollingEnabled = true
             background = roundedBackground(Color.rgb(8, 13, 24))
+            setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> view.parent?.requestDisallowInterceptTouchEvent(true)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+                false
+            }
             addView(log, FrameLayout.LayoutParams(-1, -2))
         }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -442,12 +452,24 @@ class MainActivity : Activity() {
 
     private fun updateStatus(id: String, view: TextView, running: Set<String>, logText: String = readLog(Store.logFile(this, id))) {
         val lines = logText.lineSequence().toList()
-        val errorIndex = lines.indexOfLast { errorLine.containsMatchIn(it) }
-        val successIndex = lines.indexOfLast { successLine.containsMatchIn(it) }
+        val serverErrorIndex = lines.indexOfLast {
+            !it.startsWith("[tunnel] ") && errorLine.containsMatchIn(it)
+        }
+        val serverSuccessIndex = lines.indexOfLast {
+            !it.startsWith("[tunnel] ") && serverSuccessLine.containsMatchIn(it)
+        }
+        val tunnelErrorIndex = lines.indexOfLast {
+            it.startsWith("[tunnel] ") && errorLine.containsMatchIn(it)
+        }
+        val tunnelSuccessIndex = lines.indexOfLast {
+            it.startsWith("[tunnel] ") && tunnelSuccessLine.containsMatchIn(it)
+        }
         val (label, color) = when {
             id !in running -> "หยุดอยู่" to mutedColor
-            errorIndex > successIndex -> "พบ Error" to errorColor
-            successIndex >= 0 -> "ทำงานปกติ" to successColor
+            serverErrorIndex > serverSuccessIndex -> "Server Error" to errorColor
+            tunnelErrorIndex > tunnelSuccessIndex -> "Tunnel Error" to errorColor
+            serverSuccessIndex >= 0 -> "Server ทำงานปกติ" to successColor
+            tunnelSuccessIndex >= 0 -> "Tunnel เชื่อมต่อแล้ว" to successColor
             else -> "กำลังเริ่ม" to Color.rgb(251, 191, 36)
         }
         view.text = "● $label"
@@ -491,6 +513,10 @@ class MainActivity : Activity() {
     private val successLine = Regex(
         "(?i)(registered tunnel connection|quick tunnel has been created|application startup complete|uvicorn running on|server is running|listening on|ready to accept)"
     )
+    private val serverSuccessLine = Regex(
+        "(?i)(application startup complete|uvicorn running on|server is running|listening on|ready to accept)"
+    )
+    private val tunnelSuccessLine = Regex("(?i)(registered tunnel connection|quick tunnel has been created)")
     private val domainPattern = Regex("https://(?!api\\.)[a-z0-9-]+\\.trycloudflare\\.com")
 
     private fun fileText(id: String) =

@@ -46,6 +46,20 @@ jobs:
         run: |
           TAG=2026.1.1
           git clone --depth 1 --branch "$TAG" https://github.com/cloudflare/cloudflared.git cf
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("cf/ingress/origins/dns.go")
+          source = path.read_text()
+          old = "\t\taddresses: []netip.AddrPort{defaultResolverAddr},"
+          new = (
+              "\t\taddresses: []netip.AddrPort{netip.MustParseAddrPort(\"1.1.1.1:53\"), "
+              "netip.MustParseAddrPort(\"8.8.8.8:53\")},\n\t\tstatic: true,"
+          )
+          if source.count(old) != 1:
+              raise SystemExit("Could not apply Android DNS resolver patch")
+          path.write_text(source.replace(old, new))
+          PY
           cat > cf/cmd/cloudflared/zz_resolver.go <<'GOEOF'
           package main
 

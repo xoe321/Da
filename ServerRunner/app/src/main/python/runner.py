@@ -17,4 +17,5 @@ def run(path, logpath, port=8080):
     try:
         runpy.run_path(path, run_name="__main__")
     except BaseException:
+        print("PY ERROR: uncaught exception", file=sys.stderr)
         traceback.print_exc()

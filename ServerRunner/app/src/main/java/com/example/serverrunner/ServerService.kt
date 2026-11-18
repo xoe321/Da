@@ -260,9 +260,9 @@ class ServerService : Service() {
             val p = pb.start()
             r.server = p
             if (r.stopped) p.destroy()
-            p.inputStream.bufferedReader().forEachLine { log(id, it) }
-            log(id, "BINARY EXITED")
-        } catch (e: Exception) { log(id, "BINARY ERROR: " + e.message) }
+            p.inputStream.bufferedReader().forEachLine { log(id, "[server] $it") }
+            log(id, "[server] BINARY EXITED")
+        } catch (e: Exception) { log(id, "[server] BINARY ERROR: " + e.message) }
     }
 
     private fun runTunnel(id: String, r: Run, port: Int, token: String) {
@@ -280,8 +280,8 @@ class ServerService : Service() {
             val p = pb.start()
             r.tunnel = p
             if (r.stopped) p.destroy()
-            p.inputStream.bufferedReader().forEachLine { log(id, it) }
-        } catch (e: Exception) { log(id, "TUNNEL ERROR: " + e.message) }
+            p.inputStream.bufferedReader().forEachLine { log(id, "[tunnel] $it") }
+        } catch (e: Exception) { log(id, "[tunnel] TUNNEL ERROR: " + e.message) }
     }
 
     override fun onDestroy() {
