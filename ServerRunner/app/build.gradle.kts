@@ -21,10 +21,6 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        pip {
-            // sqlite3 is built into Python. Everything else comes from app/requirements.txt
-            // (filtered by .github/check_libs.py in CI), and is packed inside the APK.
-            install("-r", "requirements.txt")
-        }
+        pip { install("-r", "requirements.txt") }
     }
 }
