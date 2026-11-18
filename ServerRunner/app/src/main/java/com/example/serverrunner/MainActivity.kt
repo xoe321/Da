@@ -6,7 +6,11 @@ import android.database.sqlite.SQLiteDatabase
 import android.provider.OpenableColumns
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,43 +19,171 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.view.Gravity
+import android.view.View
 import android.widget.*
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 class MainActivity : Activity() {
     private class Card(
+        val container: LinearLayout,
         val name: EditText, val port: EditText, val token: EditText,
-        val file: TextView, val db: TextView, val status: TextView, val url: TextView, val log: TextView)
+        val file: TextView, val db: TextView, val status: TextView,
+        val url: TextView, val copyDomain: Button, val log: TextView, val logScroll: ScrollView)
 
     private lateinit var prefs: SharedPreferences
     private lateinit var listBox: LinearLayout
+    private lateinit var listScroll: ScrollView
+    private lateinit var drawer: LinearLayout
+    private lateinit var drawerList: LinearLayout
+    private lateinit var drawerOverlay: View
     private val cards = HashMap<String, Card>()
+    private val drawerStatuses = HashMap<String, TextView>()
     private val h = Handler(Looper.getMainLooper())
     private var pendingStart: String? = null
     private var pickFor: String? = null
     private var exportFile: File? = null
+    private val backgroundColor = Color.rgb(11, 18, 32)
+    private val surfaceColor = Color.rgb(20, 30, 48)
+    private val inputColor = Color.rgb(29, 42, 63)
+    private val accentColor = Color.rgb(45, 212, 191)
+    private val successColor = Color.rgb(52, 211, 153)
+    private val errorColor = Color.rgb(248, 113, 113)
+    private val mutedColor = Color.rgb(148, 163, 184)
+    private val textColor = Color.rgb(226, 232, 240)
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        if (Build.VERSION.SDK_INT >= 21) {
+            window.statusBarColor = backgroundColor
+            window.navigationBarColor = backgroundColor
+            window.decorView.systemUiVisibility = 0
+        }
         prefs = getSharedPreferences("p", MODE_PRIVATE)
         if (Build.VERSION.SDK_INT >= 33)
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
         migrateOld()
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 80, 32, 32) }
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val add = Button(this).apply { text = "+ เพิ่ม Server"; setOnClickListener { addServer() } }
-        val stopAll = Button(this).apply { text = "Stop ทั้งหมด"; setOnClickListener { stopAll() } }
-        bar.addView(add, LinearLayout.LayoutParams(0, -2, 1f))
-        bar.addView(stopAll, LinearLayout.LayoutParams(0, -2, 1f))
+        val root = FrameLayout(this).apply { setBackgroundColor(backgroundColor) }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+        }
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val title = TextView(this).apply {
+            text = "Server Runner"
+            textSize = 22f
+            setTextColor(textColor)
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        toolbar.addView(title, LinearLayout.LayoutParams(0, dp(52), 1f))
+        toolbar.addView(styledButton("☰", inputColor).apply {
+            contentDescription = "เปิดรายชื่อ Server"
+            setOnClickListener { openDrawer() }
+        }, LinearLayout.LayoutParams(dp(52), dp(48)))
+
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val add = styledButton("+ เพิ่ม Server", accentColor).apply {
+            setTextColor(backgroundColor)
+            setOnClickListener { addServer() }
+        }
+        val stopAll = styledButton("หยุดทั้งหมด", inputColor).apply { setOnClickListener { stopAll() } }
+        actions.addView(add, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) })
+        actions.addView(stopAll, LinearLayout.LayoutParams(0, dp(48), 1f))
+
         listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(bar)
-        root.addView(ScrollView(this).apply { addView(listBox) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        listScroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            addView(listBox)
+        }
+        content.addView(toolbar)
+        content.addView(actions, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+        content.addView(listScroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
+        root.addView(content)
+
+        drawerOverlay = View(this).apply {
+            setBackgroundColor(0x99000000.toInt())
+            visibility = View.GONE
+            setOnClickListener { closeDrawer() }
+        }
+        root.addView(drawerOverlay, FrameLayout.LayoutParams(-1, -1))
+
+        drawer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedBackground(surfaceColor, inputColor)
+            setPadding(dp(16), dp(18), dp(16), dp(16))
+            elevation = dp(16).toFloat()
+            visibility = View.GONE
+        }
+        val drawerHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        drawerHeader.addView(TextView(this).apply {
+            text = "เซิร์ฟเวอร์ทั้งหมด"
+            textSize = 19f
+            setTextColor(textColor)
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        drawerHeader.addView(styledButton("ปิด", inputColor).apply {
+            setOnClickListener { closeDrawer() }
+        }, LinearLayout.LayoutParams(dp(64), dp(42)))
+        drawerList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val drawerScroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            addView(drawerList)
+        }
+        drawer.addView(drawerHeader)
+        drawer.addView(drawerScroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12) })
+        val drawerWidth = minOf(dp(340), resources.displayMetrics.widthPixels - dp(40))
+        root.addView(drawer, FrameLayout.LayoutParams(drawerWidth, -1, Gravity.END))
+
         setContentView(root)
         buildList()
         if (intent?.getBooleanExtra("stop", false) == true) { stopAll(); intent.removeExtra("stop") }
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    private fun roundedBackground(color: Int, stroke: Int = Color.TRANSPARENT) =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(16).toFloat()
+            if (stroke != Color.TRANSPARENT) setStroke(dp(1), stroke)
+        }
+
+    private fun styledButton(label: String, color: Int) = Button(this).apply {
+        text = label
+        textSize = 14f
+        isAllCaps = false
+        setTextColor(textColor)
+        backgroundTintList = null
+        background = roundedBackground(color)
+        minHeight = dp(42)
+        stateListAnimator = null
+    }
+
+    private fun openDrawer() {
+        refreshDrawer()
+        drawerOverlay.visibility = View.VISIBLE
+        drawer.visibility = View.VISIBLE
+        drawer.translationX = drawer.width.toFloat()
+        drawer.animate().translationX(0f).setDuration(180).start()
+    }
+
+    private fun closeDrawer() {
+        drawerOverlay.visibility = View.GONE
+        drawer.visibility = View.GONE
     }
 
     // Older single-server version stored one "server_file" + a token pref.
@@ -96,6 +228,7 @@ class MainActivity : Activity() {
     private fun buildList() {
         listBox.removeAllViews(); cards.clear()
         Store.load(this).forEach { addCard(it) }
+        refreshDrawer()
     }
 
     private fun addServer() {
@@ -104,16 +237,44 @@ class MainActivity : Activity() {
             (l.maxOfOrNull { it.port } ?: 8079) + 1, "")
         l.add(s); Store.save(this, l)
         addCard(s)
+        refreshDrawer()
     }
 
     private fun addCard(s: Srv) {
         val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24); setBackgroundColor(0x14000000)
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = roundedBackground(surfaceColor, inputColor)
         }
-        val name = EditText(this).apply { setText(s.name); hint = "ชื่อ"; setSingleLine() }
-        val file = TextView(this).apply { text = fileText(s.id) }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val name = EditText(this).apply {
+            setText(s.name)
+            hint = "ชื่อ Server"
+            setSingleLine()
+            styleInput(this)
+        }
+        header.addView(name, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) })
+        val status = TextView(this).apply {
+            text = "หยุดอยู่"
+            textSize = 12f
+            setTextColor(mutedColor)
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(7), dp(10), dp(7))
+            background = roundedBackground(inputColor)
+        }
+        header.addView(status)
+
+        val file = TextView(this).apply {
+            text = fileText(s.id)
+            textSize = 13f
+            setTextColor(mutedColor)
+            setPadding(dp(2), dp(4), dp(2), dp(4))
+        }
         val pick = Button(this).apply {
-            text = "เลือกไฟล์ (.py หรือ Go binary)"
+            text = "เลือกไฟล์ Server (.py หรือ Go)"
             setOnClickListener {
                 pickFor = s.id
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -121,34 +282,216 @@ class MainActivity : Activity() {
                 }, 1)
             }
         }
-        val db = TextView(this).apply { textSize = 12f }
+        styleButton(pick, inputColor)
+
+        val db = TextView(this).apply {
+            textSize = 12f
+            setTextColor(mutedColor)
+            setPadding(dp(2), dp(8), dp(2), dp(4))
+        }
         val dbRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val dbIn = Button(this).apply { text = "นำเข้า .sqlite3"; setOnClickListener { importDb(s.id) } }
-        val dbOut = Button(this).apply { text = "ส่งออก/สำรอง"; setOnClickListener { exportDb(s.id) } }
-        listOf(dbIn, dbOut).forEach { dbRow.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+        val dbIn = styledButton("นำเข้า SQLite", inputColor).apply { setOnClickListener { importDb(s.id) } }
+        val dbOut = styledButton("สำรอง SQLite", inputColor).apply { setOnClickListener { exportDb(s.id) } }
+        listOf(dbIn, dbOut).forEach {
+            dbRow.addView(it, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
+        }
         val port = EditText(this).apply {
-            setText(s.port.toString()); hint = "Port"; inputType = InputType.TYPE_CLASS_NUMBER
+            setText(s.port.toString())
+            hint = "Port"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            styleInput(this)
         }
         val token = EditText(this).apply {
-            hint = "Cloudflare Tunnel token (ว่าง = ลิงก์สุ่ม)"; setSingleLine(); setText(s.token)
+            hint = "Cloudflare Tunnel token (เว้นว่างเพื่อใช้ลิงก์สุ่ม)"
+            setSingleLine()
+            setText(s.token)
+            styleInput(this)
         }
-        val status = TextView(this).apply { textSize = 15f }
-        val url = TextView(this).apply { textSize = 15f; setTextIsSelectable(true) }
-        val log = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 10f; maxLines = 8 }
+        val url = TextView(this).apply {
+            textSize = 14f
+            setTextColor(accentColor)
+            setTextIsSelectable(true)
+            visibility = View.GONE
+        }
+        val copyDomain = styledButton("คัดลอก Domain", Color.rgb(13, 148, 136)).apply {
+            visibility = View.GONE
+            setOnClickListener {
+                val domain = url.text.toString()
+                if (domain.isNotBlank()) {
+                    (this@MainActivity.getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("Server domain", domain))
+                    Toast.makeText(this@MainActivity, "คัดลอก Domain แล้ว", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        val logHeader = TextView(this).apply {
+            text = "Logs  ·  ลากขึ้นลงเพื่อดู"
+            textSize = 13f
+            setTextColor(mutedColor)
+            setPadding(dp(2), dp(10), dp(2), dp(6))
+        }
+        val log = TextView(this).apply {
+            text = "รอ Log จาก Server..."
+            typeface = Typeface.MONOSPACE
+            textSize = 11f
+            setTextColor(mutedColor)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        val logScroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = true
+            isFillViewport = true
+            background = roundedBackground(Color.rgb(8, 13, 24))
+            addView(log, ScrollView.LayoutParams(-1, -2))
+        }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val start = Button(this).apply { text = "Start"; setOnClickListener { startFlow(s.id) } }
-        val stop = Button(this).apply { text = "Stop"; setOnClickListener { stopOne(s.id) } }
-        val del = Button(this).apply { text = "ลบ"; setOnClickListener {
-            AlertDialog.Builder(this@MainActivity).setTitle("ลบ ${s.name}?")
-                .setMessage("ไฟล์ server และฐานข้อมูล (.sqlite3) ทั้งหมดของตัวนี้จะถูกลบ")
-                .setPositiveButton("ลบ") { _, _ -> deleteServer(s.id) }
-                .setNegativeButton("ยกเลิก", null).show()
-        } }
-        listOf(start, stop, del).forEach { row.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
-        listOf(name, pick, file, port, token, db, dbRow, row, status, url, log).forEach { box.addView(it) }
-        listBox.addView(box, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 24 })
-        cards[s.id] = Card(name, port, token, file, db, status, url, log)
+        val start = styledButton("เริ่ม", Color.rgb(5, 150, 105)).apply { setOnClickListener { startFlow(s.id) } }
+        val stop = styledButton("หยุด", inputColor).apply { setOnClickListener { stopOne(s.id) } }
+        val del = styledButton("ลบ", Color.rgb(127, 29, 29)).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle("ลบ ${s.name}?")
+                    .setMessage("ไฟล์ Server และฐานข้อมูลของ Server นี้จะถูกลบ")
+                    .setPositiveButton("ลบ") { _, _ -> deleteServer(s.id) }
+                    .setNegativeButton("ยกเลิก", null).show()
+            }
+        }
+        listOf(start, stop, del).forEach {
+            row.addView(it, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
+        }
+
+        box.addView(header)
+        box.addView(pick, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(10) })
+        box.addView(file)
+        box.addView(port, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+        box.addView(token, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+        box.addView(db)
+        box.addView(dbRow)
+        box.addView(row, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(10) })
+        box.addView(url, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        box.addView(copyDomain, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(6) })
+        box.addView(logHeader)
+        box.addView(logScroll, LinearLayout.LayoutParams(-1, dp(190)))
+        listBox.addView(box, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        cards[s.id] = Card(box, name, port, token, file, db, status, url, copyDomain, log, logScroll)
     }
+
+    private fun styleInput(input: EditText) {
+        input.textSize = 15f
+        input.setTextColor(textColor)
+        input.setHintTextColor(mutedColor)
+        input.background = roundedBackground(inputColor)
+        input.setPadding(dp(12), dp(8), dp(12), dp(8))
+    }
+
+    private fun styleButton(button: Button, color: Int) {
+        button.textSize = 14f
+        button.isAllCaps = false
+        button.setTextColor(textColor)
+        button.backgroundTintList = null
+        button.background = roundedBackground(color)
+        button.minHeight = dp(42)
+        button.stateListAnimator = null
+    }
+
+    private fun refreshDrawer() {
+        drawerList.removeAllViews()
+        drawerStatuses.clear()
+        val running = Store.running(this)
+        val servers = Store.load(this)
+        servers.forEach { server ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = roundedBackground(inputColor)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    closeDrawer()
+                    cards[server.id]?.let { card ->
+                        listScroll.post { listScroll.smoothScrollTo(0, card.container.top) }
+                    }
+                }
+            }
+            val title = TextView(this).apply {
+                text = server.name.ifBlank { "Server" }
+                textSize = 15f
+                setTextColor(textColor)
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            val detail = TextView(this).apply {
+                text = "Port ${server.port}"
+                textSize = 12f
+                setTextColor(mutedColor)
+            }
+            val state = TextView(this).apply { textSize = 12f }
+            row.addView(title)
+            row.addView(detail)
+            row.addView(state, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+            drawerList.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+            drawerStatuses[server.id] = state
+            updateStatus(server.id, state, running)
+        }
+        if (servers.isEmpty()) {
+            drawerList.addView(TextView(this).apply {
+                text = "ยังไม่มี Server แตะ + เพิ่ม Server เพื่อเริ่มต้น"
+                textSize = 14f
+                setTextColor(mutedColor)
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+            })
+        }
+    }
+
+    private fun updateStatus(id: String, view: TextView, running: Set<String>, logText: String = readLog(Store.logFile(this, id))) {
+        val lines = logText.lineSequence().toList()
+        val errorIndex = lines.indexOfLast { errorLine.containsMatchIn(it) }
+        val successIndex = lines.indexOfLast { successLine.containsMatchIn(it) }
+        val (label, color) = when {
+            id !in running -> "หยุดอยู่" to mutedColor
+            errorIndex > successIndex -> "พบ Error" to errorColor
+            successIndex >= 0 -> "ทำงานปกติ" to successColor
+            else -> "กำลังเริ่ม" to Color.rgb(251, 191, 36)
+        }
+        view.text = "● $label"
+        view.setTextColor(color)
+        view.background = roundedBackground(Color.argb(24, Color.red(color), Color.green(color), Color.blue(color)))
+        if (view === cards[id]?.status) view.setPadding(dp(10), dp(7), dp(10), dp(7))
+    }
+
+    private fun renderLog(view: TextView, content: String) {
+        val styled = SpannableStringBuilder()
+        var offset = 0
+        content.lineSequence().forEach { line ->
+            val color = when {
+                errorLine.containsMatchIn(line) -> errorColor
+                successLine.containsMatchIn(line) -> successColor
+                else -> mutedColor
+            }
+            val start = offset
+            styled.append(line).append('\n')
+            offset = styled.length
+            if (offset > start) styled.setSpan(
+                ForegroundColorSpan(color), start, offset, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        view.text = styled
+    }
+
+    private fun readLog(file: File): String = try {
+        RandomAccessFile(file, "r").use { input ->
+            val length = minOf(input.length(), 24L * 1024).toInt()
+            val bytes = ByteArray(length)
+            input.seek(input.length() - length)
+            input.readFully(bytes)
+            String(bytes, Charsets.UTF_8).takeLast(12000)
+        }
+    } catch (e: Exception) {
+        ""
+    }
+
+    private val errorLine = Regex("(?i)(\\b(error|err|fatal|exception|traceback|failed|refused|denied)\\b|[A-Za-z]+Error\\b)")
+    private val successLine = Regex(
+        "(?i)(registered tunnel connection|quick tunnel has been created|application startup complete|uvicorn running on|server is running|listening on|ready to accept)"
+    )
+    private val domainPattern = Regex("https://(?!api\\.)[a-z0-9-]+\\.trycloudflare\\.com")
 
     private fun fileText(id: String) =
         if (File(Store.dir(this, id), "server_file").exists()) "ไฟล์ server พร้อมแล้ว" else "ยังไม่ได้เลือกไฟล์"
@@ -241,6 +584,7 @@ class MainActivity : Activity() {
             it.token = c.token.text.toString().trim()
         }
         Store.save(this, l)
+        refreshDrawer()
     }
 
     private fun deleteServer(id: String) {
@@ -283,6 +627,8 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Port ${me.port} ซ้ำกับ ${clash.name}", Toast.LENGTH_LONG).show(); return
         }
         cards[id]?.url?.text = ""
+        cards[id]?.url?.visibility = View.GONE
+        cards[id]?.copyDomain?.visibility = View.GONE
         startForegroundService(Intent(this, ServerService::class.java)
             .setAction(ServerService.START).putExtra("id", id))
         dim(true)
@@ -303,6 +649,14 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent?.getBooleanExtra("stop", false) == true) { stopAll(); intent.removeExtra("stop") }
+    }
+
+    override fun onBackPressed() {
+        if (::drawer.isInitialized && drawer.visibility == View.VISIBLE) {
+            closeDrawer()
+            return
+        }
+        super.onBackPressed()
     }
 
     // Lowest brightness: this window always; whole system too if "modify system settings" was granted.
@@ -349,11 +703,26 @@ class MainActivity : Activity() {
         override fun run() {
             val running = Store.running(this@MainActivity)
             for ((id, c) in cards) {
-                val t = try { Store.logFile(this@MainActivity, id).readText() } catch (e: Exception) { "" }
-                c.log.text = t.takeLast(1500)
+                val t = readLog(Store.logFile(this@MainActivity, id))
+                val oldY = c.logScroll.scrollY
+                val wasAtBottom = c.log.height <= c.logScroll.height ||
+                    oldY + c.logScroll.height >= c.log.height - dp(24)
+                val visibleLog = if (t.isBlank()) "รอ Log จาก Server..." else t
+                if (c.log.text.toString().trimEnd('\n') != visibleLog.trimEnd('\n')) {
+                    renderLog(c.log, visibleLog)
+                    c.logScroll.post {
+                        if (wasAtBottom) c.logScroll.fullScroll(View.FOCUS_DOWN)
+                        else c.logScroll.scrollTo(0, minOf(oldY, maxOf(0, c.log.height - c.logScroll.height)))
+                    }
+                }
                 c.db.text = dbText(id)
-                c.status.text = if (id in running) "● ทำงานอยู่" else "○ หยุด"
-                Regex("https://(?!api\\.)[a-z0-9-]+\\.trycloudflare\\.com").find(t)?.let { c.url.text = it.value }
+                updateStatus(id, c.status, running, t)
+                drawerStatuses[id]?.let { updateStatus(id, it, running, t) }
+                domainPattern.find(t)?.value?.let { domain ->
+                    if (c.url.text.toString() != domain) c.url.text = domain
+                    c.url.visibility = View.VISIBLE
+                    c.copyDomain.visibility = View.VISIBLE
+                }
             }
             h.postDelayed(this, 1000)
         }
