@@ -7,7 +7,6 @@ REQ = "app/requirements.txt"
 CHAQUO = "https://chaquo.com/pypi-13.1/{}/"
 DEPS = {
     "fastapi": ["pydantic"],
-    "pydantic": ["pydantic-core"],
     "argon2-cffi": ["argon2-cffi-bindings"],
     "cryptography": ["cffi"],
     "slowapi": ["fastapi"],

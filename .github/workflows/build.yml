@@ -23,6 +23,12 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Build pure-Python Pydantic wheel
+        run: |
+          python -m pip wheel --no-deps --no-binary=pydantic \
+            --wheel-dir ServerRunner/app/wheels pydantic==1.10.24
+          test -f ServerRunner/app/wheels/pydantic-1.10.24-py3-none-any.whl
+
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools

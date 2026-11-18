@@ -21,6 +21,9 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        pip { install("-r", "requirements.txt") }
+        pip {
+            install("wheels/pydantic-1.10.24-py3-none-any.whl")
+            install("-r", "requirements.txt")
+        }
     }
 }
