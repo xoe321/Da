@@ -41,7 +41,8 @@ class ServerService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
-    private fun log(id: String, s: String) { try { Store.logFile(this, id).appendText(s + "\n") } catch (e: Exception) {} }
+    private fun log(id: String, s: String) { try { Store.serverLogFile(this, id).appendText(s + "\n") } catch (e: Exception) {} }
+    private fun tunnelLog(id: String, s: String) { try { Store.tunnelLogFile(this, id).appendText(s + "\n") } catch (e: Exception) {} }
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -116,7 +117,8 @@ class ServerService : Service() {
         if (runs.containsKey(id)) return
         val s = Store.load(this).firstOrNull { it.id == id }
         if (s == null) { Store.setRunning(this, Store.running(this) - id); return }
-        Store.logFile(this, id).writeText("")
+        Store.serverLogFile(this, id).writeText("")
+        Store.tunnelLogFile(this, id).writeText("")
         val f = File(Store.dir(this, id), "server_file")
         if (!f.exists()) {
             log(id, "ยังไม่ได้เลือกไฟล์ server")
@@ -147,7 +149,7 @@ class ServerService : Service() {
     private fun startPython(id: String, slot: Int, f: File, port: Int) {
         val cls = workers[slot]
         startService(Intent(this, cls)
-            .putExtra("path", f.path).putExtra("log", Store.logFile(this, id).path).putExtra("port", port))
+            .putExtra("path", f.path).putExtra("log", Store.serverLogFile(this, id).path).putExtra("port", port))
         // Binding from this foreground service raises the worker's priority so it isn't killed in the background.
         val conn = object : ServiceConnection {
             override fun onServiceConnected(n: ComponentName?, b: IBinder?) {}
@@ -202,7 +204,7 @@ class ServerService : Service() {
         Thread {
             while (!r.stopped) {
                 try { Thread.sleep(2000) } catch (e: Exception) { return@Thread }
-                if (tail(Store.logFile(this, id), 8192).contains("unable to open database file", true)) {
+                if (tail(Store.serverLogFile(this, id), 8192).contains("unable to open database file", true)) {
                     main.post { onDbError(id, r, f, elf) }
                     return@Thread
                 }
@@ -260,9 +262,9 @@ class ServerService : Service() {
             val p = pb.start()
             r.server = p
             if (r.stopped) p.destroy()
-            p.inputStream.bufferedReader().forEachLine { log(id, "[server] $it") }
-            log(id, "[server] BINARY EXITED")
-        } catch (e: Exception) { log(id, "[server] BINARY ERROR: " + e.message) }
+            p.inputStream.bufferedReader().forEachLine { log(id, it) }
+            log(id, "BINARY EXITED")
+        } catch (e: Exception) { log(id, "BINARY ERROR: " + e.message) }
     }
 
     private fun runTunnel(id: String, r: Run, port: Int, token: String) {
@@ -280,8 +282,8 @@ class ServerService : Service() {
             val p = pb.start()
             r.tunnel = p
             if (r.stopped) p.destroy()
-            p.inputStream.bufferedReader().forEachLine { log(id, "[tunnel] $it") }
-        } catch (e: Exception) { log(id, "[tunnel] TUNNEL ERROR: " + e.message) }
+            p.inputStream.bufferedReader().forEachLine { tunnelLog(id, it) }
+        } catch (e: Exception) { tunnelLog(id, "TUNNEL ERROR: " + e.message) }
     }
 
     override fun onDestroy() {

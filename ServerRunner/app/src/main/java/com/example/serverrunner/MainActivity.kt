@@ -32,11 +32,14 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 class MainActivity : Activity() {
+    private class LogPanel(val text: TextView, val scroll: ScrollView)
+
     private class Card(
         val container: LinearLayout,
         val name: EditText, val port: EditText, val token: EditText,
         val file: TextView, val db: TextView, val status: TextView,
-        val url: TextView, val copyDomain: Button, val log: TextView, val logScroll: ScrollView)
+        val url: TextView, val copyDomain: Button,
+        val serverLog: LogPanel, val tunnelLog: LogPanel)
 
     private lateinit var prefs: SharedPreferences
     private lateinit var listBox: LinearLayout
@@ -326,33 +329,35 @@ class MainActivity : Activity() {
             }
         }
         val logHeader = TextView(this).apply {
-            text = "Logs  ·  ลากขึ้นลงเพื่อดู"
+            text = "Logs"
             textSize = 13f
             setTextColor(mutedColor)
             setPadding(dp(2), dp(10), dp(2), dp(6))
         }
-        val log = TextView(this).apply {
-            text = "รอ Log จาก Server..."
-            typeface = Typeface.MONOSPACE
-            textSize = 11f
-            setTextColor(mutedColor)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+        val serverLog = createLogPanel("รอ Log จาก Server...")
+        val tunnelLog = createLogPanel("รอ Log จาก Tunnel...")
+        val serverLogTab = styledButton("Server", accentColor)
+        val tunnelLogTab = styledButton("Tunnel", inputColor)
+        val logTabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(serverLogTab, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(8) })
+            addView(tunnelLogTab, LinearLayout.LayoutParams(0, dp(42), 1f))
         }
-        val logScroll = ScrollView(this).apply {
-            isVerticalScrollBarEnabled = true
-            isFillViewport = true
-            isNestedScrollingEnabled = true
-            background = roundedBackground(Color.rgb(8, 13, 24))
-            setOnTouchListener { view, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> view.parent?.requestDisallowInterceptTouchEvent(true)
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                        view.parent?.requestDisallowInterceptTouchEvent(false)
-                }
-                false
-            }
-            addView(log, FrameLayout.LayoutParams(-1, -2))
+        val logPages = FrameLayout(this)
+        logPages.addView(serverLog.scroll, FrameLayout.LayoutParams(-1, -1))
+        logPages.addView(tunnelLog.scroll, FrameLayout.LayoutParams(-1, -1))
+        tunnelLog.scroll.visibility = View.GONE
+        val selectLogTab: (Boolean) -> Unit = { showServer ->
+            serverLog.scroll.visibility = if (showServer) View.VISIBLE else View.GONE
+            tunnelLog.scroll.visibility = if (showServer) View.GONE else View.VISIBLE
+            serverLogTab.background = roundedBackground(if (showServer) accentColor else inputColor)
+            serverLogTab.setTextColor(if (showServer) backgroundColor else textColor)
+            tunnelLogTab.background = roundedBackground(if (showServer) inputColor else accentColor)
+            tunnelLogTab.setTextColor(if (showServer) textColor else backgroundColor)
         }
+        serverLogTab.setOnClickListener { selectLogTab(true) }
+        tunnelLogTab.setOnClickListener { selectLogTab(false) }
+        selectLogTab(true)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val start = styledButton("เริ่ม", Color.rgb(5, 150, 105)).apply { setOnClickListener { startFlow(s.id) } }
         val stop = styledButton("หยุด", inputColor).apply { setOnClickListener { stopOne(s.id) } }
@@ -379,9 +384,36 @@ class MainActivity : Activity() {
         box.addView(url, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         box.addView(copyDomain, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(6) })
         box.addView(logHeader)
-        box.addView(logScroll, LinearLayout.LayoutParams(-1, dp(190)))
+        box.addView(logTabs, LinearLayout.LayoutParams(-1, dp(42)))
+        box.addView(logPages, LinearLayout.LayoutParams(-1, dp(190)).apply { topMargin = dp(6) })
         listBox.addView(box, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
-        cards[s.id] = Card(box, name, port, token, file, db, status, url, copyDomain, log, logScroll)
+        cards[s.id] = Card(box, name, port, token, file, db, status, url, copyDomain, serverLog, tunnelLog)
+    }
+
+    private fun createLogPanel(placeholder: String): LogPanel {
+        val text = TextView(this).apply {
+            this.text = placeholder
+            typeface = Typeface.MONOSPACE
+            textSize = 11f
+            setTextColor(mutedColor)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        val scroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = true
+            isFillViewport = true
+            isNestedScrollingEnabled = true
+            background = roundedBackground(Color.rgb(8, 13, 24))
+            setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> view.parent?.requestDisallowInterceptTouchEvent(true)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+                false
+            }
+            addView(text, FrameLayout.LayoutParams(-1, -2))
+        }
+        return LogPanel(text, scroll)
     }
 
     private fun styleInput(input: EditText) {
@@ -450,20 +482,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateStatus(id: String, view: TextView, running: Set<String>, logText: String = readLog(Store.logFile(this, id))) {
-        val lines = logText.lineSequence().toList()
-        val serverErrorIndex = lines.indexOfLast {
-            !it.startsWith("[tunnel] ") && errorLine.containsMatchIn(it)
-        }
-        val serverSuccessIndex = lines.indexOfLast {
-            !it.startsWith("[tunnel] ") && serverSuccessLine.containsMatchIn(it)
-        }
-        val tunnelErrorIndex = lines.indexOfLast {
-            it.startsWith("[tunnel] ") && errorLine.containsMatchIn(it)
-        }
-        val tunnelSuccessIndex = lines.indexOfLast {
-            it.startsWith("[tunnel] ") && tunnelSuccessLine.containsMatchIn(it)
-        }
+    private fun updateStatus(
+        id: String,
+        view: TextView,
+        running: Set<String>,
+        serverLog: String = readLog(Store.serverLogFile(this, id)),
+        tunnelLog: String = readLog(Store.tunnelLogFile(this, id))
+    ) {
+        val serverLines = serverLog.lineSequence().toList()
+        val tunnelLines = tunnelLog.lineSequence().toList()
+        val serverErrorIndex = serverLines.indexOfLast { errorLine.containsMatchIn(it) }
+        val serverSuccessIndex = serverLines.indexOfLast { serverSuccessLine.containsMatchIn(it) }
+        val tunnelErrorIndex = tunnelLines.indexOfLast { errorLine.containsMatchIn(it) }
+        val tunnelSuccessIndex = tunnelLines.indexOfLast { tunnelSuccessLine.containsMatchIn(it) }
         val (label, color) = when {
             id !in running -> "หยุดอยู่" to mutedColor
             serverErrorIndex > serverSuccessIndex -> "Server Error" to errorColor
@@ -495,6 +526,20 @@ class MainActivity : Activity() {
             )
         }
         view.text = styled
+    }
+
+    private fun refreshLog(panel: LogPanel, content: String, placeholder: String) {
+        val oldY = panel.scroll.scrollY
+        val wasAtBottom = panel.text.height <= panel.scroll.height ||
+            oldY + panel.scroll.height >= panel.text.height - dp(24)
+        val visibleLog = if (content.isBlank()) placeholder else content
+        if (panel.text.text.toString().trimEnd('\n') != visibleLog.trimEnd('\n')) {
+            renderLog(panel.text, visibleLog)
+            panel.scroll.post {
+                if (wasAtBottom) panel.scroll.fullScroll(View.FOCUS_DOWN)
+                else panel.scroll.scrollTo(0, minOf(oldY, maxOf(0, panel.text.height - panel.scroll.height)))
+            }
+        }
     }
 
     private fun readLog(file: File): String = try {
@@ -729,22 +774,14 @@ class MainActivity : Activity() {
         override fun run() {
             val running = Store.running(this@MainActivity)
             for ((id, c) in cards) {
-                val t = readLog(Store.logFile(this@MainActivity, id))
-                val oldY = c.logScroll.scrollY
-                val wasAtBottom = c.log.height <= c.logScroll.height ||
-                    oldY + c.logScroll.height >= c.log.height - dp(24)
-                val visibleLog = if (t.isBlank()) "รอ Log จาก Server..." else t
-                if (c.log.text.toString().trimEnd('\n') != visibleLog.trimEnd('\n')) {
-                    renderLog(c.log, visibleLog)
-                    c.logScroll.post {
-                        if (wasAtBottom) c.logScroll.fullScroll(View.FOCUS_DOWN)
-                        else c.logScroll.scrollTo(0, minOf(oldY, maxOf(0, c.log.height - c.logScroll.height)))
-                    }
-                }
+                val serverLog = readLog(Store.serverLogFile(this@MainActivity, id))
+                val tunnelLog = readLog(Store.tunnelLogFile(this@MainActivity, id))
+                refreshLog(c.serverLog, serverLog, "รอ Log จาก Server...")
+                refreshLog(c.tunnelLog, tunnelLog, "รอ Log จาก Tunnel...")
                 c.db.text = dbText(id)
-                updateStatus(id, c.status, running, t)
-                drawerStatuses[id]?.let { updateStatus(id, it, running, t) }
-                domainPattern.find(t)?.value?.let { domain ->
+                updateStatus(id, c.status, running, serverLog, tunnelLog)
+                drawerStatuses[id]?.let { updateStatus(id, it, running, serverLog, tunnelLog) }
+                domainPattern.find(tunnelLog)?.value?.let { domain ->
                     if (c.url.text.toString() != domain) c.url.text = domain
                     c.url.visibility = View.VISIBLE
                     c.copyDomain.visibility = View.VISIBLE

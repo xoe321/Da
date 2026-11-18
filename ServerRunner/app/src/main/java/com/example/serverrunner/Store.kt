@@ -11,7 +11,8 @@ data class Srv(val id: String, var name: String, var port: Int, var token: Strin
 // processes, so SharedPreferences is not reliable between them.
 object Store {
     fun dir(c: Context, id: String) = File(c.filesDir, "servers/$id").apply { mkdirs() }
-    fun logFile(c: Context, id: String) = File(dir(c, id), "log.txt")
+    fun serverLogFile(c: Context, id: String) = File(dir(c, id), "server.log")
+    fun tunnelLogFile(c: Context, id: String) = File(dir(c, id), "tunnel.log")
 
     fun dataDir(c: Context, id: String) = File(dir(c, id), "data").apply { mkdirs() }
     // Include databases nested in data/ or the server folder (relative paths resolve there).
