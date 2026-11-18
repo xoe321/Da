@@ -14,12 +14,17 @@ object Store {
     fun logFile(c: Context, id: String) = File(dir(c, id), "log.txt")
 
     fun dataDir(c: Context, id: String) = File(dir(c, id), "data").apply { mkdirs() }
-    // .sqlite3 files in data/ and in the server's own folder (relative paths resolve there).
-    fun dbFiles(c: Context, id: String): List<File> =
-        listOf(dataDir(c, id), dir(c, id)).flatMap { d ->
-            d.listFiles { f -> f.isFile && f.name.lowercase().let {
-                it.endsWith(".sqlite3") || it.endsWith(".sqlite") || it.endsWith(".db") } }?.toList() ?: emptyList()
-        }.sortedBy { it.name }
+    // Include databases nested in data/ or the server folder (relative paths resolve there).
+    fun dbFiles(c: Context, id: String): List<File> {
+        val root = dir(c, id)
+        return listOf(dataDir(c, id), root).flatMap { base ->
+            base.walkTopDown().filter { file ->
+                if (!file.isFile) return@filter false
+                val name = file.name.lowercase()
+                name.endsWith(".sqlite3") || name.endsWith(".sqlite") || name.endsWith(".db")
+            }.toList()
+        }.distinctBy { it.absolutePath }.sortedBy { it.relativeTo(root).path }
+    }
 
     fun load(c: Context): MutableList<Srv> {
         val f = File(c.filesDir, "servers.json")
