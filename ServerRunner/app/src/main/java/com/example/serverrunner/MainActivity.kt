@@ -325,6 +325,7 @@ class MainActivity : Activity() {
         styleButton(pick, inputColor)
 
         val db = TextView(this).apply {
+            text = dbText(s.id)
             textSize = 12f
             setTextColor(mutedColor)
             setPadding(dp(2), dp(8), dp(2), dp(4))
@@ -605,8 +606,8 @@ class MainActivity : Activity() {
 
     private fun dbText(id: String): String {
         val l = Store.dbFiles(this, id)
-        return if (l.isEmpty()) "ฐานข้อมูล: ยังไม่มี (server เก็บที่ \$DB_PATH หรือโฟลเดอร์ data/)"
-        else "ฐานข้อมูล: " + l.joinToString(", ") {
+        return if (l.isEmpty()) "ฐานข้อมูล: ไม่พบในโฟลเดอร์ Server ของแอป (สแกน .db, .sqlite และ .sqlite3 อัตโนมัติ)"
+        else "พบฐานข้อมูลอัตโนมัติ: " + l.joinToString(", ") {
             "${it.relativeTo(Store.dir(this, id)).path} (${it.length() / 1024} KB)"
         }
     }
@@ -794,6 +795,7 @@ class MainActivity : Activity() {
                     File(Store.dir(this, id), "server_file").outputStream().use { o -> i.copyTo(o) }
                 }
                 cards[id]?.file?.text = fileText(id)
+                cards[id]?.db?.text = dbText(id)
             }
             5 -> { val id = pickFor ?: return; doImport(id, data?.data ?: return) }
             6 -> {

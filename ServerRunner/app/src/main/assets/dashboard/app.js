@@ -126,6 +126,53 @@ function updateLog(element, value) {
   if (follow) element.scrollTop = element.scrollHeight;
 }
 
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value < 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatRate(value) {
+  return Number.isFinite(value) ? `${formatBytes(value)}/s` : "กำลังวัด";
+}
+
+function renderDeviceMetrics(metrics = {}) {
+  document.getElementById("wifi-status").textContent =
+    metrics.wifiStatus || "ไม่พร้อมใช้งาน";
+  document.getElementById("wifi-rx").textContent = formatRate(metrics.wifiRxBytesPerSecond);
+  document.getElementById("wifi-tx").textContent = formatRate(metrics.wifiTxBytesPerSecond);
+  document.getElementById("wifi-link").textContent = Number.isFinite(metrics.wifiLinkSpeedMbps)
+    ? `${metrics.wifiLinkSpeedMbps} Mbps`
+    : "—";
+  document.getElementById("wifi-rssi").textContent = Number.isFinite(metrics.wifiRssiDbm)
+    ? `${metrics.wifiRssiDbm} dBm`
+    : "—";
+  document.getElementById("latency").textContent = Number.isFinite(metrics.latencyMs)
+    ? `${metrics.latencyMs} ms`
+    : "วัดไม่ได้";
+  document.getElementById("battery").textContent = Number.isFinite(metrics.batteryPercent)
+    ? `${metrics.batteryPercent}%`
+    : "—";
+  document.getElementById("ram").textContent = Number.isFinite(metrics.ramUsedBytes)
+    ? `${formatBytes(metrics.ramUsedBytes)} / ${formatBytes(metrics.ramTotalBytes)}`
+    : "—";
+  document.getElementById("storage").textContent = Number.isFinite(metrics.storageFreeBytes)
+    ? `${formatBytes(metrics.storageFreeBytes)} ว่าง / ${formatBytes(metrics.storageTotalBytes)}`
+    : "—";
+  document.getElementById("metrics-updated").textContent =
+    `ตรวจล่าสุด ${new Date().toLocaleTimeString()}`;
+  document.getElementById("metrics-error").textContent =
+    metrics.errors && metrics.errors.length
+      ? `ข้อมูลบางรายการอ่านไม่ได้: ${metrics.errors.join(" · ")}`
+      : "";
+}
+
 function createServerCard() {
   const root = document.createElement("article");
   root.className = "server-card";
@@ -205,6 +252,7 @@ async function refreshState() {
     setBadge(document.getElementById("dashboard-tunnel-status"), `Tunnel: ${state.dashboardTunnelStatus}`);
     updateLog(document.getElementById("dashboard-tunnel-log"), state.dashboardTunnelLog);
     updateLog(document.getElementById("dashboard-server-log"), state.dashboardServerLog);
+    renderDeviceMetrics(state.deviceMetrics);
     const present = new Set();
     for (const server of state.servers) {
       present.add(server.id);

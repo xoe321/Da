@@ -51,6 +51,52 @@
         </details>
       </section>
 
+      <section class="panel device-panel">
+        <div class="section-heading">
+          <div>
+            <h2>สถานะมือถือ</h2>
+            <p id="wifi-status" class="muted">กำลังอ่านข้อมูลอุปกรณ์...</p>
+          </div>
+          <span id="metrics-updated" class="muted"></span>
+        </div>
+        <div class="metrics-grid">
+          <article class="metric">
+            <span class="metric-label">Wi-Fi รับเข้า</span>
+            <strong id="wifi-rx" class="metric-value">—</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">Wi-Fi ส่งออก</span>
+            <strong id="wifi-tx" class="metric-value">—</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">ความเร็ว Wi-Fi</span>
+            <strong id="wifi-link" class="metric-value">—</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">สัญญาณ Wi-Fi</span>
+            <strong id="wifi-rssi" class="metric-value">—</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">TCP latency</span>
+            <strong id="latency" class="metric-value">—</strong>
+            <span class="metric-hint">ทดสอบไป 1.1.1.1:443 (ไม่ใช่ ICMP ping)</span>
+          </article>
+          <article class="metric">
+            <span class="metric-label">แบตเตอรี่</span>
+            <strong id="battery" class="metric-value">—</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">RAM ที่ใช้</span>
+            <strong id="ram" class="metric-value">—</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">พื้นที่ว่าง</span>
+            <strong id="storage" class="metric-value">—</strong>
+          </article>
+        </div>
+        <p id="metrics-error" class="muted metric-error"></p>
+      </section>
+
       <div class="section-heading servers-heading">
         <div>
           <h2>Servers</h2>

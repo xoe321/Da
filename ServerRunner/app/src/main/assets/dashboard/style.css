@@ -86,6 +86,51 @@ p {
   margin-bottom: 24px;
 }
 
+.device-panel {
+  margin-bottom: 24px;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.metric {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 78px;
+  padding: 11px;
+  border: 1px solid #e3e5e8;
+  border-radius: 9px;
+  background: #f8f9fa;
+}
+
+.metric-label,
+.metric-hint {
+  color: #68717d;
+  font-size: 0.76rem;
+}
+
+.metric-value {
+  color: #303943;
+  font-size: 1rem;
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.metric-hint {
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.metric-error {
+  margin-top: 10px;
+  font-size: 0.78rem;
+}
+
 .servers-heading {
   margin: 0 2px 12px;
 }

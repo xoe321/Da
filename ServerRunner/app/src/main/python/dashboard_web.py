@@ -2,6 +2,7 @@ import hmac
 import json
 import re
 import secrets
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,11 @@ DB_SUFFIXES = (".sqlite3", ".sqlite", ".db")
 SECRET_VALUE_RE = re.compile(
     r"""(?i)(["']?(?:token|password|secret|api[_-]?key)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)"""
 )
+_METRICS_LOCK = threading.Lock()
+_METRICS_CACHE = {"sampled_at": 0.0, "data": None}
+_TRAFFIC_SAMPLE = None
+_LATENCY_SAMPLE_AT = 0.0
+_LATENCY_SAMPLE_MS = None
 
 
 def _redact(text, values=()):
@@ -54,6 +60,132 @@ def _status(log_text, running, success_pattern):
     if success_index >= 0:
         return "ทำงานปกติ"
     return "กำลังเริ่ม"
+
+
+def _device_metrics(context, root):
+    global _TRAFFIC_SAMPLE, _LATENCY_SAMPLE_AT, _LATENCY_SAMPLE_MS
+
+    now = time.monotonic()
+    with _METRICS_LOCK:
+        cached = _METRICS_CACHE["data"]
+        if cached is not None and now - _METRICS_CACHE["sampled_at"] < 1:
+            return dict(cached)
+
+        errors = []
+        metrics = {
+            "wifiConnected": False,
+            "wifiStatus": "ไม่พร้อมใช้งาน",
+            "wifiRssiDbm": None,
+            "wifiLinkSpeedMbps": None,
+            "wifiRxBytesPerSecond": None,
+            "wifiTxBytesPerSecond": None,
+            "latencyMs": _LATENCY_SAMPLE_MS,
+            "batteryPercent": None,
+            "ramUsedBytes": None,
+            "ramTotalBytes": None,
+            "storageFreeBytes": None,
+            "storageTotalBytes": None,
+            "errors": errors,
+        }
+
+        interface = None
+        try:
+            from java import jclass
+
+            connectivity = context.getSystemService("connectivity")
+            network = connectivity.getActiveNetwork()
+            capabilities = connectivity.getNetworkCapabilities(network) if network is not None else None
+            network_capabilities = jclass("android.net.NetworkCapabilities")
+            wifi_connected = bool(
+                capabilities and capabilities.hasTransport(network_capabilities.TRANSPORT_WIFI)
+            )
+            metrics["wifiConnected"] = wifi_connected
+            metrics["wifiStatus"] = "เชื่อมต่อแล้ว" if wifi_connected else "ไม่ได้เชื่อมต่อ Wi-Fi"
+            if wifi_connected:
+                wifi = context.getSystemService("wifi")
+                info = wifi.getConnectionInfo()
+                rssi = int(info.getRssi())
+                link_speed = int(info.getLinkSpeed())
+                metrics["wifiRssiDbm"] = rssi if -127 < rssi <= 0 else None
+                metrics["wifiLinkSpeedMbps"] = link_speed if link_speed > 0 else None
+                properties = connectivity.getLinkProperties(network)
+                interface_name = properties.getInterfaceName() if properties is not None else None
+                interface = str(interface_name) if interface_name is not None else None
+        except Exception:
+            errors.append("อ่านสถานะ Wi-Fi ไม่สำเร็จ")
+
+        if interface:
+            try:
+                from java import jclass
+
+                traffic = jclass("android.net.TrafficStats")
+                received = int(traffic.getRxBytes(interface))
+                sent = int(traffic.getTxBytes(interface))
+                if received >= 0 and sent >= 0:
+                    if _TRAFFIC_SAMPLE is not None and _TRAFFIC_SAMPLE[0] == interface:
+                        elapsed = max(now - _TRAFFIC_SAMPLE[1], 0.001)
+                        metrics["wifiRxBytesPerSecond"] = round(max(0, received - _TRAFFIC_SAMPLE[2]) / elapsed)
+                        metrics["wifiTxBytesPerSecond"] = round(max(0, sent - _TRAFFIC_SAMPLE[3]) / elapsed)
+                    _TRAFFIC_SAMPLE = (interface, now, received, sent)
+                else:
+                    errors.append("อุปกรณ์ไม่รายงานปริมาณรับ/ส่ง Wi-Fi")
+            except Exception:
+                errors.append("อ่านปริมาณรับ/ส่ง Wi-Fi ไม่สำเร็จ")
+        elif metrics["wifiConnected"]:
+            errors.append("ไม่พบ Network interface ของ Wi-Fi")
+
+        if now - _LATENCY_SAMPLE_AT >= 10:
+            _LATENCY_SAMPLE_AT = now
+            try:
+                started = time.monotonic()
+                with socket.create_connection(("1.1.1.1", 443), timeout=1.5):
+                    _LATENCY_SAMPLE_MS = round((time.monotonic() - started) * 1000)
+                metrics["latencyMs"] = _LATENCY_SAMPLE_MS
+            except OSError:
+                _LATENCY_SAMPLE_MS = None
+                metrics["latencyMs"] = None
+                errors.append("วัด TCP latency ไป 1.1.1.1:443 ไม่สำเร็จ")
+
+        try:
+            from java import jclass
+
+            intent = jclass("android.content.Intent")
+            intent_filter = jclass("android.content.IntentFilter")(intent.ACTION_BATTERY_CHANGED)
+            battery = context.registerReceiver(None, intent_filter)
+            if battery is not None:
+                level = int(battery.getIntExtra("level", -1))
+                scale = int(battery.getIntExtra("scale", 100))
+                if level >= 0 and scale > 0:
+                    metrics["batteryPercent"] = round(level * 100 / scale)
+            if metrics["batteryPercent"] is None:
+                errors.append("อ่านระดับแบตเตอรี่ไม่สำเร็จ")
+        except Exception:
+            errors.append("อ่านระดับแบตเตอรี่ไม่สำเร็จ")
+
+        try:
+            from java import jclass
+
+            activity_manager = context.getSystemService("activity")
+            memory_info = jclass("android.app.ActivityManager$MemoryInfo")()
+            activity_manager.getMemoryInfo(memory_info)
+            metrics["ramTotalBytes"] = int(memory_info.totalMem)
+            metrics["ramUsedBytes"] = max(0, int(memory_info.totalMem) - int(memory_info.availMem))
+        except Exception:
+            errors.append("อ่านข้อมูล RAM ไม่สำเร็จ")
+
+        try:
+            from java import jclass
+
+            storage = jclass("android.os.StatFs")(str(root))
+            metrics["storageFreeBytes"] = int(storage.getAvailableBytes())
+            metrics["storageTotalBytes"] = int(storage.getTotalBytes())
+        except Exception:
+            errors.append("อ่านพื้นที่จัดเก็บไม่สำเร็จ")
+
+        result = dict(metrics)
+        _METRICS_CACHE["sampled_at"] = now
+        _METRICS_CACHE["data"] = result
+        return dict(result)
 
 
 def _send_service_intent(context, action, **extras):
@@ -225,6 +357,7 @@ class DashboardServer(ThreadingHTTPServer):
             "dashboardTunnelStatus": _status(dashboard_tunnel_log, dashboard_enabled, TUNNEL_OK_RE),
             "dashboardServerLog": dashboard_server_log,
             "dashboardTunnelLog": dashboard_tunnel_log,
+            "deviceMetrics": _device_metrics(self.context, self.root),
             "servers": [],
         }
         for server in servers:
